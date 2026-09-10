@@ -39,8 +39,15 @@ jobs:
           assert 'version' in data, 'Missing version'
           kinds = data.get('kinds', [])
           entry_points = data.get('entryPoints', {})
+          kind_map = {
+              'bar-widget': 'barWidget',
+              'overlay': 'overlay',
+              'service': 'service',
+              'app': 'app'
+          }
           for k in kinds:
-              assert k in entry_points, f'kind {k} missing in entryPoints'
+              expected_ep = kind_map.get(k, k)
+              assert expected_ep in entry_points, f'kind {k} ({expected_ep}) missing in entryPoints'
           print('Manifest validation passed successfully.')
           "
 

@@ -21,6 +21,16 @@ case "$action" in
   agent|workspace)
     exec omarchy-shell voice toggleAgentWorkspace
     ;;
+  speak)
+    shift
+    cmd_file="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/voice-assistant.cmd"
+    echo "speak $*" > "$cmd_file"
+    ;;
+  notify)
+    shift
+    cmd_file="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/voice-assistant.cmd"
+    echo "notify $*" > "$cmd_file"
+    ;;
   notify-agent|agent-notify)
     shift
     exec "$SCRIPT_DIR/omarchy-voice-agent-notify" "$@"
@@ -44,6 +54,8 @@ Usage:
   omarchy-voice mute         Toggle microphone mute
   omarchy-voice dismiss      Dismiss/close active overlay surfaces
   omarchy-voice agent        Toggle the AI special workspace (special:agent)
+  omarchy-voice speak <text> Inject text into the live voice session for TTS
+  omarchy-voice notify <msg> Speak a brief proactive notification via the voice assistant
   omarchy-voice notify-agent Audio chime + click-to-focus desktop notification
   omarchy-voice status       Display current state JSON (state, title, mute, repo)
 

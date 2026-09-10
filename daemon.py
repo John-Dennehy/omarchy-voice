@@ -942,22 +942,57 @@ async def control_reader_loop(ws):
     
     cmd_file = Path(os.environ.get("XDG_RUNTIME_DIR", "/run/user/1000")) / "voice-assistant.cmd"
 
+    async def handle_command(cmd):
+        global is_muted, active_project
+        if cmd == "toggle_mute":
+            is_muted = not is_muted
+            emit("muted", isMuted=is_muted)
+        elif cmd.startswith("switch_project "):
+            p = cmd.split(" ", 1)[1].strip()
+            tool_switch_project({"repo": p})
+        elif cmd.startswith("park_idea "):
+            thought = cmd.split(" ", 1)[1].strip()
+            tool_park_idea({"thought": thought})
+        elif cmd.startswith("speak ") and ws is not None:
+            # Inject text into the live session so the model speaks it back via TTS
+            text = cmd.split(" ", 1)[1].strip()
+            if text and not is_muted:
+                try:
+                    msg = {
+                        "clientContent": {
+                            "turns": [{"role": "user", "parts": [{"text": text}]}],
+                            "turnComplete": True
+                        }
+                    }
+                    await ws.send(json.dumps(msg))
+                except Exception:
+                    pass
+        elif cmd.startswith("notify "):
+            # Proactive notification: speak via live session if available, else log
+            text = cmd.split(" ", 1)[1].strip()
+            if text and not is_muted:
+                emit("transcript", role="tool", text=f"[Notification] {text}")
+                if ws is not None:
+                    try:
+                        prompt = f"Briefly announce to the user in one short sentence: {text}"
+                        msg = {
+                            "clientContent": {
+                                "turns": [{"role": "user", "parts": [{"text": prompt}]}],
+                                "turnComplete": True
+                            }
+                        }
+                        await ws.send(json.dumps(msg))
+                    except Exception:
+                        pass
+        elif cmd == "quit":
+            sys.exit(0)
+
     while True:
         try:
             line = await asyncio.wait_for(reader.readline(), timeout=0.5)
             line = line.decode().strip()
             if line:
-                if line == "toggle_mute":
-                    is_muted = not is_muted
-                    emit("muted", isMuted=is_muted)
-                elif line.startswith("switch_project "):
-                    p = line.split(" ", 1)[1].strip()
-                    tool_switch_project({"repo": p})
-                elif line.startswith("park_idea "):
-                    thought = line.split(" ", 1)[1].strip()
-                    tool_park_idea({"thought": thought})
-                elif line == "quit":
-                    sys.exit(0)
+                await handle_command(line)
         except asyncio.TimeoutError:
             pass
         
@@ -965,15 +1000,8 @@ async def control_reader_loop(ws):
             try:
                 cmd = cmd_file.read_text().strip()
                 cmd_file.unlink(missing_ok=True)
-                if cmd == "toggle_mute":
-                    is_muted = not is_muted
-                    emit("muted", isMuted=is_muted)
-                elif cmd.startswith("switch_project "):
-                    p = cmd.split(" ", 1)[1].strip()
-                    tool_switch_project({"repo": p})
-                elif cmd.startswith("park_idea "):
-                    thought = cmd.split(" ", 1)[1].strip()
-                    tool_park_idea({"thought": thought})
+                if cmd:
+                    await handle_command(cmd)
             except:
                 pass
 

@@ -126,6 +126,17 @@ if [[ "$send_notif" == "true" ]]; then
   fi
 fi
 
+# 3. Dispatch proactive voice notification to voice daemon (if running)
+# The daemon reads from a cmd file; "notify" sends the text for TTS synthesis
+voice_cmd_file="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/voice-assistant.cmd"
+voice_status_file="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy/voice/status.json"
+if [[ -n "${voice_status_file:-}" && -f "$voice_status_file" ]]; then
+  voice_state=$(jq -r '.state // "idle"' "$voice_status_file" 2>/dev/null || true)
+  if [[ "$voice_state" == "listening" || "$voice_state" == "speaking" ]]; then
+    echo "notify ${agent_name} finished and is awaiting your response. ${message}" > "$voice_cmd_file" 2>/dev/null || true
+  fi
+fi
+
 # If called as an Antigravity hook, emit JSON object to stdout as required by hook protocol
 if [[ -n "$hook_input" ]]; then
   echo "{}"

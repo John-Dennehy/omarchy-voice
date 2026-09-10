@@ -7,10 +7,18 @@
   "license": "MIT",
   "description": "Conversational voice pair-programmer and AuDHD partner for Omarchy Linux, powered by Gemini Live",
   "kinds": [
+    "bar-widget",
     "overlay"
   ],
   "keepLoaded": true,
   "entryPoints": {
+    "barWidget": "Widget.qml",
     "overlay": "VoicePill.qml"
+  },
+  "barWidget": {
+    "displayName": "Voice Assistant",
+    "description": "Status orb and toggle for conversational voice partner",
+    "category": "AI",
+    "allowMultiple": false
   }
 }

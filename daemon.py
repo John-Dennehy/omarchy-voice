@@ -27,6 +27,7 @@ STATE_DIR.mkdir(parents=True, exist_ok=True)
 CONFIG_FILE = CONFIG_DIR / "config.json"
 ENV_FILE = CONFIG_DIR / "env"
 PARKING_LOT_FILE = STATE_DIR / "parking-lot.json"
+STATUS_FILE = STATE_DIR / "status.json"
 
 # API Key resolution:
 # 1. GEMINI_API_KEY environment variable
@@ -149,6 +150,22 @@ def emit(event, **kwargs):
     payload = {"event": event, **kwargs}
     sys.stdout.write(json.dumps(payload) + "\n")
     sys.stdout.flush()
+    # Persist live state for the Omarchy status bar widget
+    if event in ("ready", "status", "muted", "tool"):
+        st = kwargs.get("state", event)
+        if event == "muted":
+            st = "muted" if kwargs.get("isMuted") else "listening"
+        status_payload = {
+            "state": st,
+            "title": kwargs.get("title", ""),
+            "project": active_project,
+            "isMuted": is_muted,
+            "updatedAt": subprocess.getoutput("date -Iseconds")
+        }
+        try:
+            STATUS_FILE.write_text(json.dumps(status_payload))
+        except:
+            pass
 
 # Tool implementations
 def tool_list_repos(args=None):
@@ -661,6 +678,16 @@ async def main():
             mic_task.cancel()
             ctrl_task.cancel()
             stop_speaker()
+            try:
+                STATUS_FILE.write_text(json.dumps({
+                    "state": "idle",
+                    "title": "Idle",
+                    "project": active_project,
+                    "isMuted": False,
+                    "updatedAt": subprocess.getoutput("date -Iseconds")
+                }))
+            except:
+                pass
 
 if __name__ == "__main__":
     try:

@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  validate:
+    name: Lint and Validate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Check Python syntax & compilation
+        run: |
+          python3 -m py_compile daemon.py
+
+      - name: Validate JSON syntax
+        run: |
+          jq . manifest.json > /dev/null
+
+      - name: Validate Plugin Manifest Schema
+        run: |
+          python3 -c "
+          import json, sys
+          with open('manifest.json') as f:
+              data = json.load(f)
+          assert data.get('schemaVersion') == 1, 'schemaVersion must be 1'
+          assert 'id' in data, 'Missing id'
+          assert 'name' in data, 'Missing name'
+          assert 'version' in data, 'Missing version'
+          kinds = data.get('kinds', [])
+          entry_points = data.get('entryPoints', {})
+          for k in kinds:
+              assert k in entry_points, f'kind {k} missing in entryPoints'
+          print('Manifest validation passed successfully.')
+          "
+
+      - name: Check Shell Script syntax
+        run: |
+          bash -n bin/omarchy-voice

@@ -1,0 +1,134 @@
+#!/usr/bin/env bash
+# omarchy:summary=Audio chime and interactive notification when a coding agent awaits user input
+# omarchy:args=[--agent <name>] [--message <msg>] [--no-sound] [--no-notify]
+# omarchy:examples=omarchy-voice-agent-notify | omarchy-voice-agent-notify --agent agy --message "Tests passed. Ready for next step."
+
+set -uo pipefail
+
+agent_name=""
+message=""
+play_audio=true
+send_notif=true
+custom_sound=""
+
+# Parse flags
+while (($# > 0)); do
+  case "$1" in
+    --agent)
+      agent_name="${2:-}"
+      shift 2
+      ;;
+    --message)
+      message="${2:-}"
+      shift 2
+      ;;
+    --sound)
+      custom_sound="${2:-}"
+      shift 2
+      ;;
+    --no-sound)
+      play_audio=false
+      shift
+      ;;
+    --no-notify)
+      send_notif=false
+      shift
+      ;;
+    -h|--help)
+      cat << 'HELP_EOF'
+Usage: omarchy-voice-agent-notify [options]
+
+Options:
+  --agent <name>       Name of agent (e.g. agy, claude, opencode)
+  --message <msg>      Custom notification message body
+  --sound <file|name>  Path to sound file or freedesktop sound name (default: complete)
+  --no-sound           Suppress sound playback
+  --no-notify          Suppress desktop notification banner
+  -h, --help           Show this help message
+
+Supports invocation directly, via terminal wrapper, or as an Antigravity/Claude lifecycle hook.
+HELP_EOF
+      exit 0
+      ;;
+    *)
+      if [[ -z "$message" ]]; then
+        message="$1"
+      fi
+      shift
+      ;;
+  esac
+done
+
+# If invoked as an agent lifecycle hook, stdin may contain JSON payload
+hook_input=""
+if [[ ! -t 0 ]]; then
+  # Read stdin without blocking indefinitely
+  hook_input=$(cat 2>/dev/null || true)
+fi
+
+# Detect agent if not specified
+if [[ -z "$agent_name" ]]; then
+  if command -v omarchy-default-agent >/dev/null 2>&1; then
+    agent_name=$(omarchy-default-agent 2>/dev/null || true)
+  fi
+  if [[ -z "$agent_name" ]]; then
+    agent_name="Agent"
+  fi
+fi
+
+# Default notification message if not set
+if [[ -z "$message" ]]; then
+  message="Finished current turn and is awaiting your input."
+fi
+
+# Format headline
+headline="${agent_name^} Ready"
+
+# 1. Play auditory earcon / chime
+if [[ "$play_audio" == "true" ]]; then
+  (
+    sound_file=""
+    if [[ -n "$custom_sound" && -f "$custom_sound" ]]; then
+      sound_file="$custom_sound"
+    elif [[ -f "/usr/share/sounds/freedesktop/stereo/complete.oga" ]]; then
+      sound_file="/usr/share/sounds/freedesktop/stereo/complete.oga"
+    elif [[ -f "/usr/share/sounds/freedesktop/stereo/message.oga" ]]; then
+      sound_file="/usr/share/sounds/freedesktop/stereo/message.oga"
+    fi
+
+    if command -v canberra-gtk-play >/dev/null 2>&1; then
+      canberra-gtk-play -i "${custom_sound:-complete}" 2>/dev/null || true
+    elif [[ -n "$sound_file" ]] && command -v pw-play >/dev/null 2>&1; then
+      pw-play "$sound_file" 2>/dev/null || true
+    elif [[ -n "$sound_file" ]] && command -v paplay >/dev/null 2>&1; then
+      paplay "$sound_file" 2>/dev/null || true
+    elif [[ -n "$sound_file" ]] && command -v aplay >/dev/null 2>&1; then
+      aplay -q "$sound_file" 2>/dev/null || true
+    else
+      printf '\a' 2>/dev/null || true
+    fi
+  ) &
+fi
+
+# 2. Dispatch interactive desktop notification with click-to-focus
+if [[ "$send_notif" == "true" ]]; then
+  focus_cmd="omarchy-hyprland-focus-app"
+  if command -v "$focus_cmd" >/dev/null 2>&1 && command -v omarchy-notification-send >/dev/null 2>&1; then
+    omarchy-notification-send \
+      --app-name "omarchy-agent" \
+      -g "󰢌" \
+      -u normal \
+      "$headline" \
+      "$message" \
+      --exec "$focus_cmd" org.omarchy.agent 2>/dev/null || true
+  elif command -v notify-send >/dev/null 2>&1; then
+    notify-send -a "omarchy-agent" -i terminal "$headline" "$message" 2>/dev/null || true
+  fi
+fi
+
+# If called as an Antigravity hook, emit JSON object to stdout as required by hook protocol
+if [[ -n "$hook_input" ]]; then
+  echo "{}"
+fi
+
+exit 0

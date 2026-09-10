@@ -210,6 +210,13 @@ Item {
               time: Qt.formatTime(new Date(), "hh:mm:ss")
             })
             root.statusSub = "Delegated to " + (data.agent || "agent")
+          } else if (data.event === "tool_activated_skill") {
+            transcriptModel.append({
+              role: "tool",
+              text: "Activated skill [" + (data.skill || "") + "] via " + (data.agent || "agent") + " (" + (data.mode || "workspace") + "): \"" + (data.prompt || "") + "\"",
+              time: Qt.formatTime(new Date(), "hh:mm:ss")
+            })
+            root.statusSub = "Skill: " + (data.skill || "")
           } else if (data.event === "parking_lot") {
             parkingLotModel.clear()
             if (data.items) {

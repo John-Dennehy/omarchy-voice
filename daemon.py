@@ -8,6 +8,7 @@
 import os
 import sys
 import json
+import re
 import base64
 import asyncio
 import subprocess
@@ -407,6 +408,165 @@ def tool_delegate_to_agent(args):
             "response": resp[:2000] if resp else "Task finished with no output."
         }
 
+def parse_skill_frontmatter(content, default_name):
+    name = default_name
+    desc = ""
+    m = re.search(r"^---\s*\n(.*?)\n---", content, re.DOTALL)
+    if not m:
+        return name, desc
+    fm = m.group(1)
+    lines = fm.splitlines()
+    in_desc = False
+    desc_lines = []
+    for line in lines:
+        if line.startswith("name:"):
+            in_desc = False
+            name = line.split("name:", 1)[1].strip().strip('"').strip("'")
+        elif line.startswith("description:"):
+            in_desc = True
+            val = line.split("description:", 1)[1].strip()
+            if val in (">", "|", ">-", "|-"):
+                desc_lines = []
+            elif val:
+                desc_lines = [val.strip('"').strip("'")]
+        elif in_desc:
+            if line.startswith("  ") or line.startswith("\t"):
+                desc_lines.append(line.strip().strip('"').strip("'"))
+            elif line.strip() == "":
+                continue
+            else:
+                in_desc = False
+    if desc_lines:
+        desc = " ".join(desc_lines).strip()
+    return name, desc
+
+def get_installed_skills():
+    skills = {}
+    skill_dirs = [
+        Path.home() / ".gemini/config/skills",
+        Path.home() / ".agents/skills",
+        Path.home() / ".config/omarchy/skills",
+        Path.home() / ".gemini/antigravity-cli/builtin/skills"
+    ]
+    for base in skill_dirs:
+        if not base.exists():
+            continue
+        try:
+            for s in sorted(base.iterdir()):
+                if s.is_dir():
+                    skill_md = s / "SKILL.md"
+                    if skill_md.exists():
+                        try:
+                            content = skill_md.read_text(encoding="utf-8")
+                            name, desc = parse_skill_frontmatter(content, s.name)
+                        except Exception:
+                            name, desc = s.name, f"{s.name} skill"
+                        if not desc:
+                            desc = f"{name} skill"
+                        if name not in skills:
+                            skills[name] = {
+                                "name": name,
+                                "description": desc,
+                                "path": str(s)
+                            }
+        except Exception:
+            pass
+    return list(skills.values())
+
+def resolve_skill_name(requested_name, installed_skills):
+    req = requested_name.strip().lower()
+    req_norm = req.replace(" ", "-").replace("_", "-")
+    for s in installed_skills:
+        s_norm = s["name"].lower().replace("_", "-")
+        if s["name"].lower() == req or s_norm == req_norm:
+            return s["name"]
+    for s in installed_skills:
+        s_norm = s["name"].lower().replace("_", "-")
+        if req_norm in s_norm or s_norm in req_norm:
+            return s["name"]
+    return requested_name
+
+def tool_list_skills(args=None):
+    skills = get_installed_skills()
+    return {
+        "count": len(skills),
+        "skills": skills
+    }
+
+def tool_activate_skill(args):
+    raw_skill = args.get("skill", "").strip()
+    if not raw_skill:
+        return {"error": "No skill specified"}
+    
+    prompt = args.get("prompt", "").strip()
+    if not prompt:
+        prompt = f"Run the {raw_skill} workflow."
+    
+    skills = get_installed_skills()
+    skill_name = resolve_skill_name(raw_skill, skills)
+    target_agent = args.get("agent") or get_default_agent()
+    mode = args.get("mode", "workspace")
+    target_repo = args.get("repo") or active_project
+
+    # Resolve target working directory
+    work_dir = Path.home() / "Work" / target_repo
+    proj_dir = Path.home() / "Projects" / target_repo
+    if work_dir.is_dir():
+        target_dir = str(work_dir)
+    elif proj_dir.is_dir():
+        target_dir = str(proj_dir)
+    elif (Path.home() / "Work").is_dir():
+        target_dir = str(Path.home() / "Work")
+    else:
+        target_dir = str(Path.home())
+
+    agent_task = f"Activate the '{skill_name}' skill: {prompt}"
+
+    if mode == "workspace":
+        cmd = f"cd {json.dumps(target_dir)} && omarchy agent --prompt {json.dumps(agent_task)}"
+        try:
+            subprocess.Popen(["hyprctl", "dispatch", f"hl.dsp.exec_cmd(\"{cmd}\")"])
+            subprocess.Popen(["hyprctl", "dispatch", "hl.dsp.workspace.toggle_special(\"agent\")"])
+        except Exception:
+            pass
+        emit("tool_activated_skill", skill=skill_name, prompt=prompt, agent=target_agent, mode="workspace", repo=target_repo)
+        emit("tool", name="activate_skill", status="done", skill=skill_name, agent=target_agent)
+        return {
+            "success": True,
+            "skill": skill_name,
+            "agent": target_agent,
+            "mode": "workspace",
+            "repo": target_repo,
+            "message": f"Activated skill '{skill_name}' with {target_agent} in AI workspace (special:agent) for {target_repo}."
+        }
+    else:
+        # Headless / inline execution
+        if target_agent == "agy":
+            exec_cmd = f"cd {json.dumps(target_dir)} && agy --dangerously-skip-permissions -p {json.dumps(agent_task)}"
+        elif target_agent == "claude":
+            exec_cmd = f"cd {json.dumps(target_dir)} && claude --permission-mode auto -p {json.dumps(agent_task)}"
+        elif target_agent == "codex":
+            exec_cmd = f"cd {json.dumps(target_dir)} && codex --approve-for-me -p {json.dumps(agent_task)}"
+        elif target_agent == "crush":
+            exec_cmd = f"cd {json.dumps(target_dir)} && crush run {json.dumps(agent_task)}"
+        elif target_agent == "copilot":
+            exec_cmd = f"cd {json.dumps(target_dir)} && copilot --allow-all -p {json.dumps(agent_task)}"
+        else:
+            exec_cmd = f"cd {json.dumps(target_dir)} && omarchy-agent --inline --prompt {json.dumps(agent_task)}"
+
+        stdout, stderr, code = run_cmd(exec_cmd, timeout=120)
+        resp = stdout.strip() if stdout.strip() else stderr.strip()
+        emit("tool_activated_skill", skill=skill_name, prompt=prompt, agent=target_agent, mode="inline", repo=target_repo)
+        emit("tool", name="activate_skill", status="done", skill=skill_name, agent=target_agent)
+        return {
+            "success": code == 0,
+            "skill": skill_name,
+            "agent": target_agent,
+            "mode": "inline",
+            "repo": target_repo,
+            "response": resp[:2500] if resp else f"Skill '{skill_name}' executed with no output."
+        }
+
 TOOLS_MAP = {
     "get_desktop_context": tool_get_desktop_context,
     "list_my_repos": tool_list_repos,
@@ -420,6 +580,8 @@ TOOLS_MAP = {
     "list_installed_agents": tool_list_installed_agents,
     "delegate_to_agent": tool_delegate_to_agent,
     "ask_agent": tool_delegate_to_agent,
+    "list_skills": tool_list_skills,
+    "activate_skill": tool_activate_skill,
 }
 
 TOOL_DECLARATIONS = [
@@ -527,6 +689,26 @@ TOOL_DECLARATIONS = [
             },
             "required": ["task"]
         }
+    },
+    {
+        "name": "list_skills",
+        "description": "Lists all installed Omarchy skills (e.g. code-review, grilling, tdd, domain-modeling, diagnose-crash, prototype, research) and their descriptions.",
+        "parameters": {"type": "OBJECT", "properties": {}}
+    },
+    {
+        "name": "activate_skill",
+        "description": "Activates an Omarchy skill (e.g. 'code-review', 'grilling', 'tdd', 'research', 'domain-modeling', 'diagnose-crash') via the coding agent. Opens in the AI scratchpad workspace or runs inline.",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "skill": {"type": "STRING", "description": "Name of the skill to activate (e.g. code-review, grilling, tdd, domain-modeling, diagnose-crash, prototype, research)"},
+                "prompt": {"type": "STRING", "description": "Specific instruction, context, or topic for the skill run (e.g. 'Review diff against main', 'Grill me on the multi-provider architecture')"},
+                "mode": {"type": "STRING", "description": "'workspace' to open in AI scratchpad workspace on screen (default), or 'inline' to run headlessly in background"},
+                "agent": {"type": "STRING", "description": "Coding agent to use (defaults to system default agent)"},
+                "repo": {"type": "STRING", "description": "Target repository (defaults to active project)"}
+            },
+            "required": ["skill", "prompt"]
+        }
     }
 ]
 
@@ -534,6 +716,14 @@ TOOL_DECLARATIONS = [
 repo_catalog_summary = "\n".join([f"- {r['name']}: {r['desc']}" for r in DISCOVERED_REPOS[:15]])
 principles_summary = "\n".join([f"- {p}" for p in custom_principles])
 default_agent_name = get_default_agent()
+installed_skills_list = get_installed_skills()
+key_skills = [s for s in installed_skills_list if s["name"] in [
+    "code-review", "grilling", "tdd", "domain-modeling", "diagnose-crash",
+    "diagnosing-bugs", "research", "prototype", "codebase-design", "wizard"
+]]
+if not key_skills:
+    key_skills = installed_skills_list[:10]
+skills_catalog_summary = "\n".join([f"- {s['name']}: {s['description'][:100]}" for s in key_skills])
 
 SYSTEM_INSTRUCTION = f"""You are an empathetic, proactive Technical Lead and executive function partner for {USER_NAME} (@{GITHUB_USER}).
 You speak with a naturally deep, warm, low-pitched British accent (Standard Southern British / RP, Charon voice) with natural British developer cadence ("Right, let's have a look", "Sorted", "All done", "No worries", "Cheers"). Always maintain a calm, relaxed, low baritone voice.
@@ -546,6 +736,9 @@ You speak with a naturally deep, warm, low-pitched British accent (Standard Sout
 
 ### Discovered Repositories:
 {repo_catalog_summary}
+
+### Key Available Omarchy Skills (call `list_skills` for full catalog):
+{skills_catalog_summary}
 
 ### Prime Directives:
 1. Autonomous Capture:
@@ -572,7 +765,14 @@ You speak with a naturally deep, warm, low-pitched British accent (Standard Sout
 - You are the conversational voice partner and tech lead, while local coding agents handle heavy file editing and execution.
 - When {USER_NAME} asks you to run a refactor, implement code, or carry out complex terminal work, delegate directly using `delegate_to_agent`.
 - By default, use the user's configured default agent (currently '{default_agent_name}'), or use `list_installed_agents` if checking what tools exist.
-- Use `mode="workspace"` for interactive tasks so the agent appears directly in the user's AI scratchpad workspace alongside your conversation."""
+- Use `mode="workspace"` for interactive tasks so the agent appears directly in the user's AI scratchpad workspace alongside your conversation.
+
+7. Omarchy Skill Orchestration:
+- You have direct access to installed Omarchy skills via `activate_skill` (e.g. `code-review`, `grilling`, `tdd`, `domain-modeling`, `diagnose-crash`, `research`, `prototype`).
+- When {USER_NAME} asks for a code review ("review my branch", "check against standards"), grilling ("grill me on this idea", "stress test this design"), TDD ("let's do TDD for this"), crash diagnosis ("why did this segfault"), or deep research, proactively call `activate_skill`.
+- Formulate a clear instruction prompt for the skill.
+- Default to mode="workspace" so the interactive agent opens in {USER_NAME}'s AI scratchpad workspace (`special:agent`) alongside your conversation.
+- Confirm with a punchy sentence: e.g. "Firing up code review on your branch in the AI workspace." """
 
 def stop_speaker():
     global current_speaker
@@ -772,6 +972,10 @@ async def main():
                             emit("transcript", role="tool", text=f"Switched active context to: {result.get('active_project')}")
                         elif name == "park_idea" and result.get("success"):
                             emit("transcript", role="tool", text=f"Parked thought for {result.get('parked', {}).get('repo')}: '{result.get('parked', {}).get('thought')}'")
+                        elif name == "activate_skill" and result.get("success"):
+                            emit("transcript", role="tool", text=f"Activated skill '{result.get('skill')}' ({result.get('mode')}) via {result.get('agent')}: {result.get('message') or result.get('response', '')[:200]}")
+                        elif name == "delegate_to_agent" and result.get("success"):
+                            emit("transcript", role="tool", text=f"Delegated to {result.get('agent')} ({result.get('mode')}): {result.get('message') or result.get('response', '')[:200]}")
                         
                         responses.append({
                             "id": call_id,

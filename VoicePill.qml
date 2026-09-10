@@ -203,6 +203,13 @@ Item {
               root.statusTitle = "Listening"
               root.statusSub = "Tool completed: " + data.name
             }
+          } else if (data.event === "tool_delegated") {
+            transcriptModel.append({
+              role: "tool",
+              text: "Delegated to " + (data.agent || "agent") + " (" + (data.mode || "workspace") + "): \"" + (data.task || "") + "\"",
+              time: Qt.formatTime(new Date(), "hh:mm:ss")
+            })
+            root.statusSub = "Delegated to " + (data.agent || "agent")
           } else if (data.event === "parking_lot") {
             parkingLotModel.clear()
             if (data.items) {

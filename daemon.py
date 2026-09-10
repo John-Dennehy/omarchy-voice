@@ -11,6 +11,7 @@ import json
 import base64
 import asyncio
 import subprocess
+import shutil
 from pathlib import Path
 
 # Setup environment & PATH
@@ -293,23 +294,118 @@ def get_desktop_context():
 def tool_get_desktop_context(args=None):
     return get_desktop_context()
 
-def tool_ask_agent(args):
-    task = args.get("task", "")
-    # Check default agent
-    default_agent, _, _ = run_cmd("omarchy-default-agent", timeout=3)
-    default_agent = default_agent or "agy"
+KNOWN_AGENTS = [
+    {"id": "agy", "name": "Antigravity", "desc": "Google DeepMind pair programmer"},
+    {"id": "claude", "name": "Claude Code", "desc": "Anthropic agentic CLI"},
+    {"id": "codex", "name": "Codex", "desc": "OpenAI coding engine"},
+    {"id": "copilot", "name": "GitHub Copilot", "desc": "GitHub Copilot CLI"},
+    {"id": "crush", "name": "Crush", "desc": "Fast terminal agent"},
+    {"id": "cursor-agent", "name": "Cursor CLI", "desc": "Cursor editor agent"},
+    {"id": "grok", "name": "Grok", "desc": "xAI terminal assistant"},
+    {"id": "hermes", "name": "Hermes", "desc": "Hermes autonomous agent"},
+    {"id": "muse", "name": "Muse Code", "desc": "Meta agent launcher"},
+    {"id": "omp", "name": "Oh My Pi", "desc": "Fast Pi coding assistant"},
+    {"id": "opencode", "name": "OpenCode", "desc": "Open-source coding CLI"},
+    {"id": "openclaw", "name": "OpenClaw", "desc": "OpenClaw agent gateway"},
+    {"id": "ori", "name": "Ori", "desc": "OpenRouter agent harness"},
+    {"id": "pi", "name": "Pi", "desc": "Minimalist coding companion"}
+]
+
+def get_default_agent():
+    agent_file = Path.home() / ".config/omarchy/defaults/agent"
+    if agent_file.exists():
+        val = agent_file.read_text().strip()
+        if val:
+            return val
+    stdout, _, code = run_cmd("omarchy-default-agent", timeout=3)
+    if code == 0 and stdout.strip():
+        return stdout.strip()
+    return "agy"
+
+def get_installed_agents():
+    default_agent = get_default_agent()
+    installed = []
+    for a in KNOWN_AGENTS:
+        binary_path = shutil.which(a["id"])
+        if binary_path:
+            installed.append({
+                "id": a["id"],
+                "name": a["name"],
+                "description": a["desc"],
+                "path": binary_path,
+                "is_default": (a["id"] == default_agent)
+            })
+    return {
+        "default": default_agent,
+        "installed": installed,
+        "count": len(installed)
+    }
+
+def tool_list_installed_agents(args=None):
+    return get_installed_agents()
+
+def tool_delegate_to_agent(args):
+    task = args.get("task", "").strip()
+    if not task:
+        return {"error": "No task provided"}
     
-    if default_agent == "agy":
-        cmd = f"agy --dangerously-skip-permissions -p {json.dumps(task)}"
-    elif default_agent == "claude":
-        cmd = f"claude --permission-mode auto -p {json.dumps(task)}"
-    elif default_agent == "codex":
-        cmd = f"codex --approve-for-me -p {json.dumps(task)}"
+    target_agent = args.get("agent") or get_default_agent()
+    mode = args.get("mode", "workspace")
+    target_repo = args.get("repo") or active_project
+    
+    # Resolve target working directory
+    work_dir = Path.home() / "Work" / target_repo
+    proj_dir = Path.home() / "Projects" / target_repo
+    if work_dir.is_dir():
+        target_dir = str(work_dir)
+    elif proj_dir.is_dir():
+        target_dir = str(proj_dir)
+    elif (Path.home() / "Work").is_dir():
+        target_dir = str(Path.home() / "Work")
     else:
-        cmd = f"omarchy-agent --inline --prompt {json.dumps(task)}"
+        target_dir = str(Path.home())
         
-    stdout, stderr, code = run_cmd(cmd, timeout=60)
-    return {"agent": default_agent, "task": task, "response": (stdout or stderr)[:2000]}
+    if mode == "workspace":
+        # Launch agent in Omarchy AI workspace (special:agent)
+        cmd = f"cd {json.dumps(target_dir)} && omarchy agent --prompt {json.dumps(task)}"
+        try:
+            subprocess.Popen(["hyprctl", "dispatch", f"hl.dsp.exec_cmd(\"{cmd}\")"])
+            subprocess.Popen(["hyprctl", "dispatch", "hl.dsp.workspace.toggle_special(\"agent\")"])
+        except Exception:
+            pass
+        emit("tool", name="delegate_to_agent", status="done", agent=target_agent)
+        return {
+            "success": True,
+            "agent": target_agent,
+            "mode": "workspace",
+            "repo": target_repo,
+            "message": f"Delegated task to {target_agent} in AI workspace (special:agent) for {target_repo}."
+        }
+    else:
+        # Headless / inline execution
+        if target_agent == "agy":
+            exec_cmd = f"cd {json.dumps(target_dir)} && agy --dangerously-skip-permissions -p {json.dumps(task)}"
+        elif target_agent == "claude":
+            exec_cmd = f"cd {json.dumps(target_dir)} && claude --permission-mode auto -p {json.dumps(task)}"
+        elif target_agent == "codex":
+            exec_cmd = f"cd {json.dumps(target_dir)} && codex --approve-for-me -p {json.dumps(task)}"
+        elif target_agent == "crush":
+            exec_cmd = f"cd {json.dumps(target_dir)} && crush run {json.dumps(task)}"
+        elif target_agent == "copilot":
+            exec_cmd = f"cd {json.dumps(target_dir)} && copilot --allow-all -p {json.dumps(task)}"
+        else:
+            exec_cmd = f"cd {json.dumps(target_dir)} && omarchy-agent --inline --prompt {json.dumps(task)}"
+            
+        stdout, stderr, code = run_cmd(exec_cmd, timeout=90)
+        resp = stdout.strip() if stdout.strip() else stderr.strip()
+        emit("tool", name="delegate_to_agent", status="done", agent=target_agent)
+        return {
+            "success": code == 0,
+            "agent": target_agent,
+            "mode": "inline",
+            "repo": target_repo,
+            "response": resp[:2000] if resp else "Task finished with no output."
+        }
 
 TOOLS_MAP = {
     "get_desktop_context": tool_get_desktop_context,
@@ -321,7 +417,9 @@ TOOLS_MAP = {
     "create_or_update_file": tool_create_or_update_file,
     "park_idea": tool_park_idea,
     "get_parking_lot": tool_get_parking_lot,
-    "ask_agent": tool_ask_agent,
+    "list_installed_agents": tool_list_installed_agents,
+    "delegate_to_agent": tool_delegate_to_agent,
+    "ask_agent": tool_delegate_to_agent,
 }
 
 TOOL_DECLARATIONS = [
@@ -412,12 +510,20 @@ TOOL_DECLARATIONS = [
         "parameters": {"type": "OBJECT", "properties": {}}
     },
     {
-        "name": "ask_agent",
-        "description": "Delegates a deep code analysis, search, or refactor to the system default AI agent.",
+        "name": "list_installed_agents",
+        "description": "Lists all AI coding agents installed on this machine (e.g. agy, claude, codex, copilot) and identifies the active Omarchy system default.",
+        "parameters": {"type": "OBJECT", "properties": {}}
+    },
+    {
+        "name": "delegate_to_agent",
+        "description": "Delegates a deep code analysis, search, editing, or refactoring task to an installed coding agent (defaults to the system default agent). Opens in the user's AI scratchpad workspace or runs inline.",
         "parameters": {
             "type": "OBJECT",
             "properties": {
-                "task": {"type": "STRING", "description": "Instruction for the AI agent"}
+                "task": {"type": "STRING", "description": "Instruction / prompt for the coding agent"},
+                "agent": {"type": "STRING", "description": "Specific agent to invoke (e.g. agy, claude, codex). Defaults to omarchy-default-agent."},
+                "mode": {"type": "STRING", "description": "'workspace' to launch in the AI scratchpad workspace on screen, or 'inline' to run headlessly and return output."},
+                "repo": {"type": "STRING", "description": "Target repository (defaults to active project)"}
             },
             "required": ["task"]
         }
@@ -427,6 +533,7 @@ TOOL_DECLARATIONS = [
 # Build dynamic system instruction
 repo_catalog_summary = "\n".join([f"- {r['name']}: {r['desc']}" for r in DISCOVERED_REPOS[:15]])
 principles_summary = "\n".join([f"- {p}" for p in custom_principles])
+default_agent_name = get_default_agent()
 
 SYSTEM_INSTRUCTION = f"""You are an empathetic, proactive Technical Lead and executive function partner for {USER_NAME} (@{GITHUB_USER}).
 You speak with a naturally deep, warm, low-pitched British accent (Standard Southern British / RP, Charon voice) with natural British developer cadence ("Right, let's have a look", "Sorted", "All done", "No worries", "Cheers"). Always maintain a calm, relaxed, low baritone voice.
@@ -459,7 +566,13 @@ You speak with a naturally deep, warm, low-pitched British accent (Standard Sout
 - If {USER_NAME} feels overwhelmed or paralyzed by options, apply the core principles to narrow down to ONE single bite-sized step.
 
 5. Voice Economy:
-- Keep spoken turns to 1–3 natural, punchy sentences. Never recite long lists or read raw code aloud."""
+- Keep spoken turns to 1–3 natural, punchy sentences. Never recite long lists or read raw code aloud.
+
+6. AI Coding Agent Delegation:
+- You are the conversational voice partner and tech lead, while local coding agents handle heavy file editing and execution.
+- When {USER_NAME} asks you to run a refactor, implement code, or carry out complex terminal work, delegate directly using `delegate_to_agent`.
+- By default, use the user's configured default agent (currently '{default_agent_name}'), or use `list_installed_agents` if checking what tools exist.
+- Use `mode="workspace"` for interactive tasks so the agent appears directly in the user's AI scratchpad workspace alongside your conversation."""
 
 def stop_speaker():
     global current_speaker

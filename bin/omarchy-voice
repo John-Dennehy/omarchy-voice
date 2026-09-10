@@ -1,30 +1,55 @@
 #!/usr/bin/env bash
-# omarchy:summary=Conversational voice partner and AuDHD executive assistant
-# omarchy:args=[toggle|expand|mute|dismiss|status]
-# omarchy:examples=omarchy-voice | omarchy-voice expand | omarchy-voice mute
-
 set -euo pipefail
 
-cmd="${1:-toggle}"
+# omarchy-voice: CLI and IPC controller for omarchy-voice assistant
+action="${1:-toggle}"
 
-case "$cmd" in
+case "$action" in
   toggle|pill)
     exec omarchy-shell voice togglePill
     ;;
-  expand|drawer|full)
+  expand|drawer|expanded)
     exec omarchy-shell voice toggleExpanded
     ;;
   mute)
     exec omarchy-shell voice toggleMute
     ;;
-  dismiss|hide|close)
+  dismiss|close)
     exec omarchy-shell voice dismiss
     ;;
+  agent|workspace)
+    exec omarchy-shell voice toggleAgentWorkspace
+    ;;
   status)
-    hyprctl layers | grep -i omarchy-voice || echo "Voice assistant inactive"
+    STATE_FILE="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy/voice/status.json"
+    if [[ -f "$STATE_FILE" ]]; then
+      cat "$STATE_FILE"
+      echo ""
+    else
+      echo '{"state":"idle","title":"Idle","isMuted":false}'
+    fi
+    ;;
+  help|--help|-h)
+    cat << 'HELP_EOF'
+omarchy-voice - Native Voice Assistant CLI & IPC Controller
+
+Usage:
+  omarchy-voice toggle     Toggle the compact floating voice pill
+  omarchy-voice expand     Open the full drawer (transcript, parking lot, repos)
+  omarchy-voice mute       Toggle microphone mute
+  omarchy-voice dismiss    Dismiss/close active overlay surfaces
+  omarchy-voice agent      Toggle the AI special workspace (special:agent)
+  omarchy-voice status     Display current state JSON (state, title, mute, repo)
+
+Desktop Integrations:
+  - Omarchy Status Bar: Click the voice orb widget on your bar
+  - AI Scratchpad: Slides in automatically alongside special:agent
+  - Keybindings: Configure your preferred keys in ~/.config/hypr/bindings.lua
+HELP_EOF
     ;;
   *)
-    echo "Usage: omarchy-voice [toggle|expand|mute|dismiss|status]" >&2
+    echo "Unknown command: $action" >&2
+    echo "Run 'omarchy-voice help' for usage." >&2
     exit 1
     ;;
 esac

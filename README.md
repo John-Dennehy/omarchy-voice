@@ -51,7 +51,9 @@ Tracking Issue: [#6: Abstract voice runtime to support pluggable multi-provider 
    - `omarchy-voice toggle`: Toggle compact overlay pill.
    - `omarchy-voice expand`: Open full drawer modal.
    - `omarchy-voice mute`: Toggle microphone mute.
-   - `omarchy-voice dismiss`: Close overlay.
+   - `omarchy-voice dismiss`: Close overlay surfaces.
+   - `omarchy-voice agent`: Toggle the AI special workspace (`special:agent`).
+   - `omarchy-voice status`: Output current assistant status JSON.
 4. **Optional Custom Keybindings (User Choice):**
    Users who wish to bind keyboard shortcuts can add their preferred chords to `~/.config/hypr/bindings.lua` (for example):
    ```lua

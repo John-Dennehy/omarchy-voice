@@ -2,6 +2,7 @@
 set -euo pipefail
 
 # omarchy-voice: CLI and IPC controller for omarchy-voice assistant
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 action="${1:-toggle}"
 
 case "$action" in
@@ -20,6 +21,10 @@ case "$action" in
   agent|workspace)
     exec omarchy-shell voice toggleAgentWorkspace
     ;;
+  notify-agent|agent-notify)
+    shift
+    exec "$SCRIPT_DIR/omarchy-voice-agent-notify" "$@"
+    ;;
   status)
     STATE_FILE="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy/voice/status.json"
     if [[ -f "$STATE_FILE" ]]; then
@@ -34,12 +39,13 @@ case "$action" in
 omarchy-voice - Native Voice Assistant CLI & IPC Controller
 
 Usage:
-  omarchy-voice toggle     Toggle the compact floating voice pill
-  omarchy-voice expand     Open the full drawer (transcript, parking lot, repos)
-  omarchy-voice mute       Toggle microphone mute
-  omarchy-voice dismiss    Dismiss/close active overlay surfaces
-  omarchy-voice agent      Toggle the AI special workspace (special:agent)
-  omarchy-voice status     Display current state JSON (state, title, mute, repo)
+  omarchy-voice toggle       Toggle the compact floating voice pill
+  omarchy-voice expand       Open the full drawer (transcript, parking lot, repos)
+  omarchy-voice mute         Toggle microphone mute
+  omarchy-voice dismiss      Dismiss/close active overlay surfaces
+  omarchy-voice agent        Toggle the AI special workspace (special:agent)
+  omarchy-voice notify-agent Audio chime + click-to-focus desktop notification
+  omarchy-voice status       Display current state JSON (state, title, mute, repo)
 
 Desktop Integrations:
   - Omarchy Status Bar: Click the voice orb widget on your bar

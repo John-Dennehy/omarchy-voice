@@ -53,8 +53,26 @@ Tracking Issue: [#6: Abstract voice runtime to support pluggable multi-provider 
    - `omarchy-voice mute`: Toggle microphone mute.
    - `omarchy-voice dismiss`: Close overlay surfaces.
    - `omarchy-voice agent`: Toggle the AI special workspace (`special:agent`).
+   - `omarchy-voice notify-agent`: Play earcon chime & send clickable desktop notification (focuses agent terminal on click).
    - `omarchy-voice status`: Output current assistant status JSON.
-4. **Optional Custom Keybindings (User Choice):**
+4. **AuDHD Focus Guard: Agent Turn Notifications & Earcon Chimes:**
+   When delegating tasks to interactive coding agents (`agy`, `claude`, `opencode`, etc.), AuDHD developers often tab away while the agent generates or executes tools and lose track of time. `omarchy-voice notify-agent` provides immediate, non-intrusive feedback:
+   - **Earcon Chime:** Plays a completion sound chime (`complete.oga` via `canberra-gtk-play` / PipeWire).
+   - **Clickable Notification:** Dispatches an Omarchy desktop banner (`󰢌`) that automatically focuses the agent window via `omarchy-hyprland-focus-app org.omarchy.agent` when clicked.
+   - **Antigravity CLI Hook Setup:** Add a `Stop` hook to `~/.gemini/config/hooks.json`:
+     ```json
+     {
+       "turn-chime": {
+         "Stop": [
+           {
+             "command": "omarchy-voice notify-agent",
+             "type": "command"
+           }
+         ]
+       }
+     }
+     ```
+5. **Optional Custom Keybindings (User Choice):**
    Users who wish to bind keyboard shortcuts can add their preferred chords to `~/.config/hypr/bindings.lua` (for example):
    ```lua
    -- Example optional bindings (pick whatever keys you prefer):

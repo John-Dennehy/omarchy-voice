@@ -53,4 +53,6 @@ jobs:
 
       - name: Check Shell Script syntax
         run: |
-          bash -n bin/omarchy-voice
+          for script in bin/*; do
+            [[ -f "$script" ]] && bash -n "$script"
+          done

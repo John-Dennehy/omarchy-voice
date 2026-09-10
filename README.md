@@ -24,7 +24,8 @@ Tracking Issue: [#6: Abstract voice runtime to support pluggable multi-provider 
 ## Key Features
 
 - **100% Native Wayland & Quickshell (QML):** Zero webapp, zero Chromium, zero localhost HTTP servers. Renders directly as native Wayland layer-shell surfaces matching Omarchy's system theme tokens.
-- **Low-Latency PipeWire Audio:** Direct PCM streaming through PipeWire (`pw-cat -r` for 16kHz microphone capture, `pw-cat -p` for 24kHz speaker playback) with instant barge-in / speech interruption.
+- **Low-Latency PipeWire Audio:** Direct PCM streaming through PipeWire (`pw-cat -r` for 16kHz microphone capture, `pw-cat -p` for 24kHz speaker playback).
+- **Client-Side VAD & Instant Barge-In:** Built-in RMS energy gating and adaptive speech hangover (~480ms) prevent streaming silence frames over the network (saving bandwidth and token costs), while triggering zero-latency local speech interruption (barge-in) the instant you speak.
 - **AuDHD Executive Function Support:**
   - **Autonomous Capture:** Infers and logs actionable GitHub issues directly from natural dialogue without requiring tedious administrative instructions.
   - **Tangent Parking Lot:** Safely catches lateral thoughts and stashes them so you don't burn working memory, then provides breadcrumbs back to your main thread.

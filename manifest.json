@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "jd.voice",
+  "name": "Voice Assistant",
+  "version": "1.0.0",
+  "author": "John Dennehy",
+  "license": "MIT",
+  "description": "Conversational voice pair-programmer and AuDHD partner for Omarchy Linux, powered by Gemini Live",
+  "kinds": [
+    "overlay"
+  ],
+  "keepLoaded": true,
+  "entryPoints": {
+    "overlay": "VoicePill.qml"
+  }
+}

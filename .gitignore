@@ -1,0 +1,22 @@
+# Secrets and environment files
+.env*
+*.env
+
+# Local state, caches, and logs
+state/
+*.log
+*.qslog
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Runtime and package manager artifacts
+.mise/
+.mise-bins/
+node_modules/
+.venv/
+
+# OS / Editor artifacts
+.DS_Store
+*.swp
+*.bak

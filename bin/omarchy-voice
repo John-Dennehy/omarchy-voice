@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# omarchy:summary=Conversational voice partner and AuDHD executive assistant
+# omarchy:args=[toggle|expand|mute|dismiss|status]
+# omarchy:examples=omarchy-voice | omarchy-voice expand | omarchy-voice mute
+
+set -euo pipefail
+
+cmd="${1:-toggle}"
+
+case "$cmd" in
+  toggle|pill)
+    exec omarchy-shell voice togglePill
+    ;;
+  expand|drawer|full)
+    exec omarchy-shell voice toggleExpanded
+    ;;
+  mute)
+    exec omarchy-shell voice toggleMute
+    ;;
+  dismiss|hide|close)
+    exec omarchy-shell voice dismiss
+    ;;
+  status)
+    hyprctl layers | grep -i omarchy-voice || echo "Voice assistant inactive"
+    ;;
+  *)
+    echo "Usage: omarchy-voice [toggle|expand|mute|dismiss|status]" >&2
+    exit 1
+    ;;
+esac

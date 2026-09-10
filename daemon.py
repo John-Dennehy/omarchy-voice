@@ -13,6 +13,8 @@ import base64
 import asyncio
 import subprocess
 import shutil
+import math
+import struct
 from pathlib import Path
 
 # Setup environment & PATH
@@ -842,6 +844,15 @@ def get_speaker():
         )
     return current_speaker
 
+def compute_audio_rms(chunk: bytes) -> float:
+    """Compute Root Mean Square (RMS) energy for 16-bit mono PCM audio."""
+    count = len(chunk) // 2
+    if count == 0:
+        return 0.0
+    samples = struct.unpack(f"<{count}h", chunk)
+    sum_sq = sum(s * s for s in samples)
+    return math.sqrt(sum_sq / count)
+
 async def audio_mic_loop(ws):
     global is_ready, is_muted, current_mic
     proc = await asyncio.create_subprocess_exec(
@@ -850,21 +861,41 @@ async def audio_mic_loop(ws):
         stderr=asyncio.subprocess.DEVNULL
     )
     current_mic = proc
+
+    # Client-side Voice Activity Detection (VAD) & speech hangover parameters
+    vad_threshold = float(os.environ.get("OMARCHY_VOICE_VAD_THRESHOLD", 450.0))
+    hangover_frames = 15  # ~480ms trailing buffer (15 frames * 32ms) to prevent clipping sentence ends
+    hangover = 0
+
     try:
         while True:
             chunk = await proc.stdout.read(1024)
             if not chunk:
                 break
             if is_ready and not is_muted:
-                b64_data = base64.b64encode(chunk).decode("utf-8")
-                msg = {
-                    "realtimeInput": {
-                        "mediaChunks": [
-                            {"mimeType": "audio/pcm;rate=16000", "data": b64_data}
-                        ]
+                rms = compute_audio_rms(chunk)
+                is_speech = rms >= vad_threshold
+
+                # Instant client-side barge-in detection (interrupt speaker immediately without roundtrip lag)
+                if is_speech and current_speaker is not None:
+                    stop_speaker()
+
+                if is_speech:
+                    hangover = hangover_frames
+                elif hangover > 0:
+                    hangover -= 1
+
+                # Stream audio only during active speech or speech hangover trailing window
+                if is_speech or hangover > 0:
+                    b64_data = base64.b64encode(chunk).decode("utf-8")
+                    msg = {
+                        "realtimeInput": {
+                            "mediaChunks": [
+                                {"mimeType": "audio/pcm;rate=16000", "data": b64_data}
+                            ]
+                        }
                     }
-                }
-                await ws.send(json.dumps(msg))
+                    await ws.send(json.dumps(msg))
     except asyncio.CancelledError:
         pass
     finally:

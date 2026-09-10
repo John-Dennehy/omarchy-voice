@@ -15,6 +15,8 @@ import subprocess
 import shutil
 import math
 import struct
+import atexit
+import signal
 from pathlib import Path
 
 # Setup environment & PATH
@@ -172,6 +174,32 @@ def get_parking_lot_data():
 
 def save_parking_lot_data(data):
     PARKING_LOT_FILE.write_text(json.dumps(data, indent=2))
+
+def cleanup_status():
+    """Reset status bar state to idle upon daemon shutdown."""
+    try:
+        proj = active_project if "active_project" in globals() else "main"
+        STATUS_FILE.write_text(json.dumps({
+            "state": "idle",
+            "title": "Idle",
+            "project": proj,
+            "isMuted": False,
+            "updatedAt": subprocess.getoutput("date -Iseconds")
+        }))
+    except Exception:
+        pass
+
+atexit.register(cleanup_status)
+
+def _handle_exit_signal(sig, frame):
+    cleanup_status()
+    sys.exit(0)
+
+for _sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+    try:
+        signal.signal(_sig, _handle_exit_signal)
+    except Exception:
+        pass
 
 def emit(event, **kwargs):
     payload = {"event": event, **kwargs}

@@ -40,6 +40,15 @@ Item {
   property bool followAgentWorkspace: true
   property bool autoOpenedByWorkspace: false
 
+  onOpenedChanged: {
+    if (!root.opened) {
+      root.sessionState = "idle"
+      root.statusTitle = "Idle"
+      root.statusSub = "Click to summon"
+      Quickshell.execDetached(["sh", "-c", "echo '{\"state\":\"idle\",\"title\":\"Idle\",\"isMuted\":false,\"updatedAt\":\"'$(date -Iseconds)'\"}' > \"$HOME/.local/state/omarchy/voice/status.json\""])
+    }
+  }
+
   FileView {
     id: configWatcher
     path: (Quickshell.env("HOME") || "") + "/.config/omarchy/voice/config.json"
@@ -264,6 +273,8 @@ Item {
         root.sessionState = "error"
         root.statusTitle = "Disconnected"
         root.statusSub = "Voice daemon stopped"
+      } else {
+        Quickshell.execDetached(["sh", "-c", "echo '{\"state\":\"idle\",\"title\":\"Idle\",\"isMuted\":false,\"updatedAt\":\"'$(date -Iseconds)'\"}' > \"$HOME/.local/state/omarchy/voice/status.json\""])
       }
     }
     stdout: SplitParser {

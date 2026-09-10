@@ -24,6 +24,13 @@ BarWidget {
         var raw = text()
         if (raw && raw.trim()) {
           var data = JSON.parse(raw.trim())
+          if (data.updatedAt) {
+            var diffMs = Date.now() - Date.parse(data.updatedAt)
+            if (!isNaN(diffMs) && diffMs > 15000) {
+              root.voiceState = "idle"
+              return
+            }
+          }
           if (data.state) root.voiceState = data.state
           if (data.project) root.activeProject = data.project
           if (data.isMuted !== undefined) root.isMuted = data.isMuted

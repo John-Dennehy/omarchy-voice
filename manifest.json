@@ -17,8 +17,47 @@
   },
   "barWidget": {
     "displayName": "Voice Assistant",
-    "description": "Status orb and toggle for conversational voice partner",
+    "description": "Status orb, floating pill, and thinking drawer for conversational voice partner",
     "category": "AI",
-    "allowMultiple": false
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "voiceName": "Charon",
+      "accent": "british",
+      "followAgentWorkspace": true,
+      "style": "AuDHD pair programming, thinking out loud, low executive load"
+    },
+    "schema": [
+      {
+        "key": "voiceName",
+        "type": "enum",
+        "label": "Voice Profile",
+        "options": ["Charon", "Aoede", "Fenrir", "Kore", "Puck"],
+        "defaultValue": "Charon",
+        "description": "Prebuilt voice profile for speech synthesis (Charon: deep, calm baritone)."
+      },
+      {
+        "key": "accent",
+        "type": "enum",
+        "label": "Spoken Accent / Cadence",
+        "options": ["british", "american", "australian"],
+        "defaultValue": "british",
+        "description": "Developer phrasing and regional conversational cadence."
+      },
+      {
+        "key": "followAgentWorkspace",
+        "type": "boolean",
+        "label": "Auto-summon in AI Workspace",
+        "defaultValue": true,
+        "description": "Automatically slide in the voice co-pilot pill when the AI workspace (special:agent) is opened."
+      },
+      {
+        "key": "style",
+        "type": "string",
+        "label": "Working Style & Cognitive Guidance",
+        "defaultValue": "AuDHD pair programming, thinking out loud, low executive load",
+        "description": "Personal thinking style directives guiding how the assistant supports focus and breaks paralysis."
+      }
+    ]
   }
 }

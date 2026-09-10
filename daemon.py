@@ -113,22 +113,54 @@ def discover_user_repos():
 
 DISCOVERED_REPOS = discover_user_repos()
 
-# 3. Load User Preferences from config.json
-user_config = {}
-if CONFIG_FILE.exists():
-    try:
-        user_config = json.loads(CONFIG_FILE.read_text())
-    except:
-        pass
+# 3. Load User Preferences from ~/.config/omarchy/shell.json and config.json
+def load_user_preferences():
+    cfg = {
+        "voiceName": "Charon",
+        "accent": "british",
+        "style": "AuDHD pair programming, thinking out loud, low executive load",
+        "principles": [
+            "1 fork: limit active work-in-progress to one branch",
+            "eat the frog: tackle highest-friction blockers first",
+            "bang for buck: evaluate tasks by highest leverage"
+        ]
+    }
+    shell_json = Path.home() / ".config/omarchy/shell.json"
+    if shell_json.exists():
+        try:
+            s_data = json.loads(shell_json.read_text())
+            layout = s_data.get("bar", {}).get("layout", {})
+            for section in ["left", "center", "right"]:
+                for item in layout.get(section, []):
+                    if item.get("id") == "jd.voice":
+                        if item.get("voiceName"): cfg["voiceName"] = item["voiceName"]
+                        if item.get("accent"): cfg["accent"] = item["accent"]
+                        if item.get("style"): cfg["style"] = item["style"]
+        except Exception:
+            pass
 
-preferred_voice = user_config.get("voice", {}).get("name", "Charon")
-preferred_accent = user_config.get("voice", {}).get("accent", "british")
-user_style = user_config.get("user", {}).get("style", "AuDHD pair programming, thinking out loud, low executive load")
-custom_principles = user_config.get("principles", [
-    "1 fork: limit active work-in-progress to one branch",
-    "eat the frog: tackle highest-friction blockers first",
-    "bang for buck: evaluate tasks by highest leverage"
-])
+    if CONFIG_FILE.exists():
+        try:
+            c_data = json.loads(CONFIG_FILE.read_text())
+            if "voice" in c_data and isinstance(c_data["voice"], dict):
+                if c_data["voice"].get("name"): cfg["voiceName"] = c_data["voice"]["name"]
+                if c_data["voice"].get("accent"): cfg["accent"] = c_data["voice"]["accent"]
+            if "voiceName" in c_data: cfg["voiceName"] = c_data["voiceName"]
+            if "accent" in c_data: cfg["accent"] = c_data["accent"]
+            if "user" in c_data and isinstance(c_data["user"], dict) and c_data["user"].get("style"):
+                cfg["style"] = c_data["user"]["style"]
+            if "style" in c_data: cfg["style"] = c_data["style"]
+            if "principles" in c_data and isinstance(c_data["principles"], list):
+                cfg["principles"] = c_data["principles"]
+        except Exception:
+            pass
+    return cfg
+
+user_config = load_user_preferences()
+preferred_voice = user_config["voiceName"]
+preferred_accent = user_config["accent"]
+user_style = user_config["style"]
+custom_principles = user_config["principles"]
 
 # State variables
 active_project = DISCOVERED_REPOS[0]["name"] if DISCOVERED_REPOS else "main"

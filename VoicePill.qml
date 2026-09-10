@@ -22,6 +22,99 @@ Item {
   property string githubUser: ""
   property bool isMuted: false
   property string currentTab: "transcript" // "transcript" or "parking_lot" or "repos"
+  property bool inAgentWorkspace: false
+  property bool followAgentWorkspace: true
+  property bool autoOpenedByWorkspace: false
+
+  FileView {
+    id: configWatcher
+    path: (Quickshell.env("HOME") || "") + "/.config/omarchy/voice/config.json"
+    watchChanges: true
+    printErrors: false
+    onLoaded: {
+      try {
+        var raw = text()
+        if (raw && raw.trim()) {
+          var cfg = JSON.parse(raw.trim())
+          if (cfg.workspace && cfg.workspace.followAgentWorkspace !== undefined) {
+            root.followAgentWorkspace = cfg.workspace.followAgentWorkspace
+          }
+        }
+      } catch (err) {}
+    }
+  }
+
+  Process {
+    id: initialWorkspaceCheck
+    command: ["sh", "-c", "hyprctl monitors -j | jq -r '.[0].specialWorkspace.name'"]
+    running: true
+    stdout: SplitParser {
+      onRead: function(line) {
+        if (!line) return
+        var name = line.trim()
+        if (name === "special:agent" || name.indexOf("special:") === 0) {
+          root.inAgentWorkspace = true
+          if (root.followAgentWorkspace && !root.opened) {
+            root.autoOpenedByWorkspace = true
+            root.open(JSON.stringify({ mode: "pill" }))
+          }
+        }
+      }
+    }
+  }
+
+  Process {
+    id: hyprSocketListener
+    command: [
+      "python3", "-u", "-c",
+      "import socket, os, sys\n" +
+      "sig = os.environ.get('HYPRLAND_INSTANCE_SIGNATURE', '')\n" +
+      "runtime = os.environ.get('XDG_RUNTIME_DIR', f'/run/user/{os.getuid()}')\n" +
+      "sock = f'{runtime}/hypr/{sig}/.socket2.sock'\n" +
+      "if os.path.exists(sock):\n" +
+      "    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)\n" +
+      "    s.connect(sock)\n" +
+      "    while True:\n" +
+      "        data = s.recv(1024)\n" +
+      "        if not data: break\n" +
+      "        for line in data.decode('utf-8', errors='ignore').splitlines():\n" +
+      "            if line:\n" +
+      "                sys.stdout.write(line + '\\n')\n" +
+      "                sys.stdout.flush()\n"
+    ]
+    running: true
+    stdout: SplitParser {
+      onRead: function(line) {
+        if (!line) return
+        var clean = line.trim()
+        if (clean.indexOf("activespecial>>special:agent") === 0 || clean.indexOf("activespecialv2>>-98") === 0) {
+          root.inAgentWorkspace = true
+          if (root.followAgentWorkspace && !root.opened) {
+            root.autoOpenedByWorkspace = true
+            root.open(JSON.stringify({ mode: "pill" }))
+          }
+        } else if (clean.indexOf("activespecial>>,") === 0 || clean.indexOf("activespecialv2>>,,") === 0) {
+          root.inAgentWorkspace = false
+          if (root.followAgentWorkspace && root.autoOpenedByWorkspace && root.opened) {
+            root.autoOpenedByWorkspace = false
+            root.dismiss()
+          }
+        }
+      }
+    }
+    onExited: function() {
+      restartSocketTimer.start()
+    }
+  }
+
+  Timer {
+    id: restartSocketTimer
+    interval: 2000
+    repeat: false
+    onTriggered: {
+      if (!hyprSocketListener.running) hyprSocketListener.running = true
+    }
+  }
 
   ListModel {
     id: transcriptModel
@@ -105,6 +198,9 @@ Item {
     function togglePill(): void { root.togglePill() }
     function toggleExpanded(): void { root.toggleExpanded() }
     function toggleMute(): void { root.toggleMute() }
+    function toggleAgentWorkspace(): void {
+      Quickshell.execDetached(["hyprctl", "dispatch", "hl.dsp.workspace.toggle_special(\"agent\")"])
+    }
   }
 
   function sendCmd(cmd) {
@@ -260,7 +356,7 @@ Item {
 
     BorderSurface {
       id: pillCard
-      width: Style.space(420)
+      width: Style.space(460)
       height: Style.space(66)
       radius: Style.cornerRadius > 0 ? Style.cornerRadius : Style.space(16)
       color: Util.alpha(Color.popups.background, 0.94)
@@ -341,6 +437,22 @@ Item {
                 font.bold: true
               }
             }
+            Rectangle {
+              visible: root.inAgentWorkspace
+              height: Style.space(18)
+              width: copilotTagText.contentWidth + Style.space(10)
+              radius: Style.space(4)
+              color: Util.alpha(Color.success, 0.18)
+              anchors.verticalCenter: parent.verticalCenter
+              Text {
+                id: copilotTagText
+                anchors.centerIn: parent
+                text: "Co-Pilot"
+                color: Color.success
+                font.pixelSize: Style.font.caption - 1
+                font.bold: true
+              }
+            }
           }
 
           Text {
@@ -357,6 +469,26 @@ Item {
           id: pillButtons
           anchors.verticalCenter: parent.verticalCenter
           spacing: Style.space(6)
+
+          Rectangle {
+            width: Style.space(32)
+            height: Style.space(32)
+            radius: Style.space(8)
+            color: root.inAgentWorkspace ? Util.alpha(Color.accent, 0.25) : (agentHover.containsMouse ? Util.alpha(Color.foreground, 0.12) : "transparent")
+            Text {
+              anchors.centerIn: parent
+              text: "󰚩"
+              color: root.inAgentWorkspace ? Color.accent : (agentHover.containsMouse ? Color.popups.text : Color.muted)
+              font.pixelSize: Style.space(16)
+            }
+            MouseArea {
+              id: agentHover
+              anchors.fill: parent
+              hoverEnabled: true
+              cursorShape: Qt.PointingHandCursor
+              onClicked: Quickshell.execDetached(["hyprctl", "dispatch", "hl.dsp.workspace.toggle_special(\"agent\")"])
+            }
+          }
 
           Rectangle {
             width: Style.space(32)
@@ -510,6 +642,43 @@ Item {
                   font.bold: true
                   font.pixelSize: Style.font.caption
                 }
+              }
+
+              Rectangle {
+                visible: root.inAgentWorkspace
+                height: Style.space(24)
+                width: expCopilotTag.contentWidth + Style.space(16)
+                radius: Style.space(6)
+                color: Util.alpha(Color.success, 0.18)
+                anchors.verticalCenter: parent.verticalCenter
+                Text {
+                  id: expCopilotTag
+                  anchors.centerIn: parent
+                  text: "special:agent co-pilot"
+                  color: Color.success
+                  font.bold: true
+                  font.pixelSize: Style.font.caption
+                }
+              }
+            }
+
+            Rectangle {
+              width: Style.space(32)
+              height: Style.space(32)
+              radius: Style.space(8)
+              color: root.inAgentWorkspace ? Util.alpha(Color.accent, 0.25) : (expAgentHover.containsMouse ? Util.alpha(Color.foreground, 0.12) : "transparent")
+              Text {
+                anchors.centerIn: parent
+                text: "󰚩"
+                color: root.inAgentWorkspace ? Color.accent : (expAgentHover.containsMouse ? Color.menu.text : Color.muted)
+                font.pixelSize: Style.space(16)
+              }
+              MouseArea {
+                id: expAgentHover
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: Quickshell.execDetached(["hyprctl", "dispatch", "hl.dsp.workspace.toggle_special(\"agent\")"])
               }
             }
 

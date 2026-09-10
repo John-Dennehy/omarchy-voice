@@ -871,7 +871,7 @@ Item {
 
                 delegate: Rectangle {
                   width: transcriptList.width
-                  height: bubbleCol.height + Style.space(16)
+                  height: bubbleCol.height + Style.space(24)
                   radius: Style.space(8)
                   color: {
                     if (model.role === "assistant") return Util.alpha(Color.accent, 0.12)
@@ -882,8 +882,8 @@ Item {
                   Column {
                     id: bubbleCol
                     anchors.fill: parent
-                    anchors.margins: Style.space(8)
-                    spacing: Style.space(4)
+                    anchors.margins: Style.space(12)
+                    spacing: Style.space(6)
 
                     Row {
                       spacing: Style.space(8)
@@ -906,6 +906,8 @@ Item {
                       wrapMode: Text.Wrap
                       color: Color.menu.text
                       font.pixelSize: Style.font.body
+                      lineHeight: 1.35
+                      lineHeightMode: Text.ProportionalHeight
                     }
                   }
                 }
@@ -917,6 +919,8 @@ Item {
                   horizontalAlignment: Text.AlignHCenter
                   color: Color.muted
                   font.pixelSize: Style.font.body
+                  lineHeight: 1.35
+                  lineHeightMode: Text.ProportionalHeight
                 }
               }
             }
@@ -959,22 +963,26 @@ Item {
 
                   delegate: Rectangle {
                     width: parkingList.width
-                    height: Style.space(56)
+                    height: Math.max(Style.space(60), thoughtCol.height + Style.space(18))
                     radius: Style.space(8)
                     color: Util.alpha(Color.foreground, 0.08)
 
                     RowLayout {
                       anchors.fill: parent
-                      anchors.margins: Style.space(8)
+                      anchors.margins: Style.space(10)
                       spacing: Style.space(8)
 
                       Column {
+                        id: thoughtCol
                         Layout.fillWidth: true
+                        spacing: Style.space(3)
                         Text {
                           text: model.thought || ""
                           font.bold: true
                           font.pixelSize: Style.font.body
                           color: Color.menu.text
+                          lineHeight: 1.25
+                          lineHeightMode: Text.ProportionalHeight
                           elide: Text.ElideRight
                           width: Style.space(380)
                         }
@@ -999,6 +1007,8 @@ Item {
                     horizontalAlignment: Text.AlignHCenter
                     color: Color.muted
                     font.pixelSize: Style.font.body
+                    lineHeight: 1.35
+                    lineHeightMode: Text.ProportionalHeight
                   }
                 }
               }
@@ -1014,7 +1024,7 @@ Item {
 
                 delegate: Rectangle {
                   width: repoList.width
-                  height: Style.space(56)
+                  height: Math.max(Style.space(60), repoCol.height + Style.space(20))
                   radius: Style.space(8)
                   color: model.name === root.activeProject ? Util.alpha(Color.accent, 0.22) : Util.alpha(Color.foreground, 0.08)
 
@@ -1037,7 +1047,9 @@ Item {
                     }
 
                     Column {
+                      id: repoCol
                       Layout.fillWidth: true
+                      spacing: Style.space(3)
                       Text {
                         text: model.name
                         font.bold: true
@@ -1048,6 +1060,8 @@ Item {
                         text: model.desc || ""
                         font.pixelSize: Style.font.caption
                         color: Color.muted
+                        lineHeight: 1.25
+                        lineHeightMode: Text.ProportionalHeight
                         elide: Text.ElideRight
                         width: Style.space(450)
                       }

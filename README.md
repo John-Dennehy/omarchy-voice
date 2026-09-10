@@ -54,12 +54,15 @@ Tracking Issue: [#6: Abstract voice runtime to support pluggable multi-provider 
    - `omarchy-voice mute`: Toggle microphone mute.
    - `omarchy-voice dismiss`: Close overlay surfaces.
    - `omarchy-voice agent`: Toggle the AI special workspace (`special:agent`).
+   - `omarchy-voice speak <text>`: Inject text into the live voice session for TTS playback.
+   - `omarchy-voice notify <msg>`: Speak a brief proactive notification via the voice assistant.
    - `omarchy-voice notify-agent`: Play earcon chime & send clickable desktop notification (focuses agent terminal on click).
    - `omarchy-voice status`: Output current assistant status JSON.
 4. **AuDHD Focus Guard: Agent Turn Notifications & Earcon Chimes:**
    When delegating tasks to interactive coding agents (`agy`, `claude`, `opencode`, etc.), AuDHD developers often tab away while the agent generates or executes tools and lose track of time. `omarchy-voice notify-agent` provides immediate, non-intrusive feedback:
    - **Earcon Chime:** Plays a completion sound chime (`complete.oga` via `canberra-gtk-play` / PipeWire).
    - **Clickable Notification:** Dispatches an Omarchy desktop banner (`󰢌`) that automatically focuses the agent window via `omarchy-hyprland-focus-app org.omarchy.agent` when clicked.
+   - **Proactive Voice Announcements:** When the voice assistant is active (listening/speaking), agent completion events are automatically routed to the live voice session for brief spoken TTS summaries — no need to check the screen.
    - **Antigravity CLI Hook Setup:** Add a `Stop` hook to `~/.gemini/config/hooks.json`:
      ```json
      {

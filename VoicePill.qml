@@ -3,6 +3,7 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import Quickshell
 import Quickshell.Wayland
+import Quickshell.Hyprland
 import Quickshell.Io
 import qs.Commons
 import qs.Ui
@@ -12,6 +13,19 @@ Item {
 
   property var shell: null
   property var manifest: null
+
+  readonly property var activeScreen: {
+    var mon = Hyprland.focusedMonitor
+    if (mon && mon.name && Quickshell.screens) {
+      for (var i = 0; i < Quickshell.screens.length; i++) {
+        var sc = Quickshell.screens[i]
+        if (sc && String(sc.name || "") === String(mon.name || "")) {
+          return sc
+        }
+      }
+    }
+    return Quickshell.screens && Quickshell.screens.length > 0 ? Quickshell.screens[0] : null
+  }
 
   property bool opened: false
   property string viewMode: "pill" // "pill" or "expanded"
@@ -337,6 +351,7 @@ Item {
   // ==========================================
   PanelWindow {
     id: pillWindow
+    screen: root.activeScreen
     visible: root.opened && root.viewMode === "pill"
     anchors {
       top: true
@@ -361,6 +376,10 @@ Item {
       radius: Style.cornerRadius > 0 ? Style.cornerRadius : Style.space(16)
       color: Util.alpha(Color.popups.background, 0.94)
       borderSpec: Border.surfaceSpec("popups", "border", Color.popups.border, Math.max(1, Style.space(1)))
+      opacity: pillWindow.visible ? 1.0 : 0.0
+      scale: pillWindow.visible ? 1.0 : 0.94
+      Behavior on opacity { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
+      Behavior on scale { NumberAnimation { duration: 200; easing.type: Easing.OutBack } }
 
       Row {
         anchors.fill: parent
@@ -559,6 +578,7 @@ Item {
   // ==========================================
   PanelWindow {
     id: expandedWindow
+    screen: root.activeScreen
     visible: root.opened && root.viewMode === "expanded"
     anchors {
       top: true
@@ -569,12 +589,14 @@ Item {
     color: "transparent"
     WlrLayershell.namespace: "omarchy-voice-expanded"
     WlrLayershell.layer: WlrLayer.Overlay
-    WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
+    WlrLayershell.keyboardFocus: root.opened && root.viewMode === "expanded" ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
     exclusionMode: ExclusionMode.Ignore
 
     Rectangle {
       anchors.fill: parent
       color: Util.alpha("#000000", 0.55)
+      opacity: expandedWindow.visible ? 1.0 : 0.0
+      Behavior on opacity { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
       MouseArea {
         anchors.fill: parent
         onClicked: root.viewMode = "pill"
@@ -583,13 +605,17 @@ Item {
 
     BorderSurface {
       id: expandedCard
-      width: Style.space(640)
-      height: Style.space(720)
+      width: Math.max(Style.space(580), Math.min(Style.space(780), parent.width * 0.55))
+      height: Math.max(Style.space(560), Math.min(Style.space(780), parent.height * 0.85))
       radius: Style.cornerRadius > 0 ? Style.cornerRadius : Style.space(18)
       anchors.centerIn: parent
       color: Color.menu.background
       borderSpec: Border.surfaceSpec("menu", "border", Color.menu.border, Math.max(1, Style.space(1)))
       padding: Style.space(20)
+      opacity: root.viewMode === "expanded" ? 1.0 : 0.0
+      scale: root.viewMode === "expanded" ? 1.0 : 0.95
+      Behavior on opacity { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
+      Behavior on scale { NumberAnimation { duration: 220; easing.type: Easing.OutBack } }
 
       MouseArea {
         anchors.fill: parent

@@ -22,12 +22,21 @@
     "allowMultiple": false,
     "defaultSection": "right",
     "defaults": {
+      "provider": "auto",
       "voiceName": "Charon",
       "accent": "british",
       "followAgentWorkspace": true,
       "style": "AuDHD pair programming, thinking out loud, low executive load"
     },
     "schema": [
+      {
+        "key": "provider",
+        "type": "enum",
+        "label": "Voice Backend Provider",
+        "options": ["auto", "gemini", "openai", "claude", "local"],
+        "defaultValue": "auto",
+        "description": "Select conversational voice runtime. 'auto' selects based on configured credentials (Gemini Live, OpenAI Realtime, Claude, or Local Offline)."
+      },
       {
         "key": "voiceName",
         "type": "enum",

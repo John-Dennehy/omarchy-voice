@@ -75,6 +75,7 @@ omarchy bar put jd.voice --after omarchy.agents
 
 # 3. Configure credentials in user environment (outside git repo)
 mkdir -p ~/.config/omarchy/voice
+# Add your preferred provider key (GEMINI_API_KEY, OPENAI_API_KEY, etc.):
 echo "GEMINI_API_KEY=your_key_here" > ~/.config/omarchy/voice/env
 chmod 600 ~/.config/omarchy/voice/env
 ```
@@ -87,6 +88,7 @@ Personal working style, principles, and preferences are stored in `~/.config/oma
 
 ```json
 {
+  "provider": "auto",
   "voice": {
     "name": "Charon",
     "accent": "british"

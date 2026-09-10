@@ -31,36 +31,23 @@ ENV_FILE = CONFIG_DIR / "env"
 PARKING_LOT_FILE = STATE_DIR / "parking-lot.json"
 STATUS_FILE = STATE_DIR / "status.json"
 
-# API Key resolution:
-# 1. GEMINI_API_KEY environment variable
-# 2. ~/.config/omarchy/voice/env
-# 3. Fallback to local .env (development only)
-API_KEY = os.environ.get("GEMINI_API_KEY")
-if not API_KEY and ENV_FILE.exists():
-    for line in ENV_FILE.read_text().splitlines():
-        line = line.strip()
-        if line and not line.startswith("#") and "GEMINI_API_KEY=" in line:
-            API_KEY = line.split("GEMINI_API_KEY=", 1)[1].strip().strip('"').strip("'")
-            break
-
-if not API_KEY:
+# Credential resolution for pluggable providers
+def get_env_var(var_name):
+    val = os.environ.get(var_name)
+    if val:
+        return val
+    if ENV_FILE.exists():
+        for line in ENV_FILE.read_text().splitlines():
+            line = line.strip()
+            if line and not line.startswith("#") and f"{var_name}=" in line:
+                return line.split(f"{var_name}=", 1)[1].strip().strip('"').strip("'")
     local_env = Path(__file__).parent / ".env"
     if local_env.exists():
         for line in local_env.read_text().splitlines():
             line = line.strip()
-            if line and not line.startswith("#") and "GEMINI_API_KEY=" in line:
-                API_KEY = line.split("GEMINI_API_KEY=", 1)[1].strip().strip('"').strip("'")
-                break
-
-if not API_KEY:
-    sys.stdout.write(json.dumps({
-        "event": "error",
-        "message": "GEMINI_API_KEY not found. Set it in environment or ~/.config/omarchy/voice/env"
-    }) + "\n")
-    sys.stdout.flush()
-    sys.exit(1)
-
-WS_URL = f"wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key={API_KEY}"
+            if line and not line.startswith("#") and f"{var_name}=" in line:
+                return line.split(f"{var_name}=", 1)[1].strip().strip('"').strip("'")
+    return None
 
 def run_cmd(cmd, timeout=30):
     res = subprocess.run(cmd, shell=True, text=True, capture_output=True, timeout=timeout)
@@ -116,6 +103,7 @@ DISCOVERED_REPOS = discover_user_repos()
 # 3. Load User Preferences from ~/.config/omarchy/shell.json and config.json
 def load_user_preferences():
     cfg = {
+        "provider": "auto",
         "voiceName": "Charon",
         "accent": "british",
         "style": "AuDHD pair programming, thinking out loud, low executive load",
@@ -133,6 +121,7 @@ def load_user_preferences():
             for section in ["left", "center", "right"]:
                 for item in layout.get(section, []):
                     if item.get("id") == "jd.voice":
+                        if item.get("provider"): cfg["provider"] = item["provider"]
                         if item.get("voiceName"): cfg["voiceName"] = item["voiceName"]
                         if item.get("accent"): cfg["accent"] = item["accent"]
                         if item.get("style"): cfg["style"] = item["style"]
@@ -142,6 +131,7 @@ def load_user_preferences():
     if CONFIG_FILE.exists():
         try:
             c_data = json.loads(CONFIG_FILE.read_text())
+            if "provider" in c_data: cfg["provider"] = c_data["provider"]
             if "voice" in c_data and isinstance(c_data["voice"], dict):
                 if c_data["voice"].get("name"): cfg["voiceName"] = c_data["voice"]["name"]
                 if c_data["voice"].get("accent"): cfg["accent"] = c_data["voice"]["accent"]
@@ -157,6 +147,7 @@ def load_user_preferences():
     return cfg
 
 user_config = load_user_preferences()
+preferred_provider = user_config["provider"]
 preferred_voice = user_config["voiceName"]
 preferred_accent = user_config["accent"]
 user_style = user_config["style"]
@@ -599,6 +590,21 @@ def tool_activate_skill(args):
             "response": resp[:2500] if resp else f"Skill '{skill_name}' executed with no output."
         }
 
+def tool_list_providers(args=None):
+    provs = []
+    for pid, pcls in PROVIDERS.items():
+        provs.append({
+            "id": pid,
+            "name": pcls.name,
+            "available": pcls.is_available()
+        })
+    active_cls = resolve_provider(user_config)
+    return {
+        "active": active_cls.id,
+        "active_name": active_cls.name,
+        "providers": provs
+    }
+
 TOOLS_MAP = {
     "get_desktop_context": tool_get_desktop_context,
     "list_my_repos": tool_list_repos,
@@ -614,6 +620,7 @@ TOOLS_MAP = {
     "ask_agent": tool_delegate_to_agent,
     "list_skills": tool_list_skills,
     "activate_skill": tool_activate_skill,
+    "list_voice_providers": tool_list_providers,
 }
 
 TOOL_DECLARATIONS = [
@@ -741,6 +748,11 @@ TOOL_DECLARATIONS = [
             },
             "required": ["skill", "prompt"]
         }
+    },
+    {
+        "name": "list_voice_providers",
+        "description": "Lists all supported AI voice backends (Gemini Live, OpenAI Realtime, Claude, Local Offline) and shows which runtime is currently active.",
+        "parameters": {"type": "OBJECT", "properties": {}}
     }
 ]
 
@@ -906,137 +918,280 @@ async def control_reader_loop(ws):
             except:
                 pass
 
-async def main():
-    global is_ready, active_project
-    import websockets
+class BaseVoiceProvider:
+    id = "base"
+    name = "Base Voice Provider"
 
-    # Check initial desktop context
+    def __init__(self, config, tools_map, tool_declarations, system_instruction):
+        self.config = config
+        self.tools_map = tools_map
+        self.tool_declarations = tool_declarations
+        self.system_instruction = system_instruction
+
+    @classmethod
+    def get_api_key(cls):
+        return None
+
+    @classmethod
+    def is_available(cls):
+        return False
+
+    async def run(self):
+        raise NotImplementedError
+
+class GeminiLiveProvider(BaseVoiceProvider):
+    id = "gemini"
+    name = "Gemini Multimodal Live"
+
+    @classmethod
+    def get_api_key(cls):
+        return get_env_var("GEMINI_API_KEY")
+
+    @classmethod
+    def is_available(cls):
+        return bool(cls.get_api_key())
+
+    async def run(self):
+        global is_ready, active_project
+        import websockets
+        key = self.get_api_key()
+        if not key:
+            emit("error", message="GEMINI_API_KEY not found. Configure in ~/.config/omarchy/voice/env or environment.")
+            emit("status", state="error", title="Missing Key", sub="GEMINI_API_KEY required")
+            return
+
+        ws_url = f"wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key={key}"
+        emit("status", state="connecting", title="Connecting...", sub=f"Initiating {self.name} session...")
+
+        async with websockets.connect(ws_url) as ws:
+            setup_msg = {
+                "setup": {
+                    "model": "models/gemini-2.5-flash-native-audio-latest",
+                    "generationConfig": {
+                        "responseModalities": ["AUDIO"],
+                        "speechConfig": {
+                            "voiceConfig": {
+                                "prebuiltVoiceConfig": {
+                                    "voiceName": self.config.get("voiceName", "Charon")
+                                }
+                            }
+                        }
+                    },
+                    "systemInstruction": {
+                        "parts": [{"text": self.system_instruction}]
+                    },
+                    "tools": [
+                        {"functionDeclarations": self.tool_declarations}
+                    ]
+                }
+            }
+            await ws.send(json.dumps(setup_msg))
+
+            mic_task = asyncio.create_task(audio_mic_loop(ws))
+            ctrl_task = asyncio.create_task(control_reader_loop(ws))
+
+            try:
+                async for raw in ws:
+                    data = json.loads(raw)
+
+                    if "setupComplete" in data:
+                        is_ready = True
+                        emit("ready", state="listening", title="Listening", sub="Speak freely anytime", activeProject=active_project, user=GITHUB_USER, provider=self.id)
+
+                    if "serverContent" in data:
+                        sc = data["serverContent"]
+                        if sc.get("interrupted"):
+                            stop_speaker()
+                            emit("status", state="listening", title="Listening", sub="Speak freely anytime")
+
+                        if "modelTurn" in sc:
+                            for part in sc["modelTurn"].get("parts", []):
+                                if "text" in part:
+                                    emit("transcript", role="assistant", text=part["text"])
+                                if "inlineData" in part:
+                                    emit("status", state="speaking", title="Speaking...", sub="Assistant speaking")
+                                    pcm_bytes = base64.b64decode(part["inlineData"]["data"])
+                                    spk = get_speaker()
+                                    if spk and spk.stdin:
+                                        try:
+                                            spk.stdin.write(pcm_bytes)
+                                            spk.stdin.flush()
+                                        except:
+                                            pass
+
+                        if sc.get("turnComplete"):
+                            emit("status", state="listening", title="Listening", sub="Speak freely anytime")
+
+                    if "toolCall" in data:
+                        tc = data["toolCall"]
+                        responses = []
+                        for call in tc.get("functionCalls", []):
+                            call_id = call.get("id")
+                            name = call.get("name")
+                            args = call.get("args", {})
+
+                            emit("tool", status="running", name=name, detail=str(args))
+                            handler = self.tools_map.get(name)
+                            if handler:
+                                try:
+                                    result = handler(args)
+                                except Exception as e:
+                                    result = {"error": str(e)}
+                            else:
+                                result = {"error": f"Tool {name} not found"}
+
+                            emit("tool", status="done", name=name, result=result)
+                            if name == "create_github_issue" and result.get("success"):
+                                emit("transcript", role="tool", text=f"Created issue in {result.get('repo')}: {result.get('url')}")
+                            elif name == "switch_project" and result.get("success"):
+                                emit("transcript", role="tool", text=f"Switched active context to: {result.get('active_project')}")
+                            elif name == "park_idea" and result.get("success"):
+                                emit("transcript", role="tool", text=f"Parked thought for {result.get('parked', {}).get('repo')}: '{result.get('parked', {}).get('thought')}'")
+                            elif name == "activate_skill" and result.get("success"):
+                                emit("transcript", role="tool", text=f"Activated skill '{result.get('skill')}' ({result.get('mode')}) via {result.get('agent')}: {result.get('message') or result.get('response', '')[:200]}")
+                            elif name == "delegate_to_agent" and result.get("success"):
+                                emit("transcript", role="tool", text=f"Delegated to {result.get('agent')} ({result.get('mode')}): {result.get('message') or result.get('response', '')[:200]}")
+
+                            responses.append({
+                                "id": call_id,
+                                "response": {"output": result}
+                            })
+
+                        resp_msg = {
+                            "toolResponse": {
+                                "functionResponses": responses
+                            }
+                        }
+                        await ws.send(json.dumps(resp_msg))
+
+            except asyncio.CancelledError:
+                pass
+            finally:
+                mic_task.cancel()
+                ctrl_task.cancel()
+                stop_speaker()
+                try:
+                    STATUS_FILE.write_text(json.dumps({
+                        "state": "idle",
+                        "title": "Idle",
+                        "project": active_project,
+                        "isMuted": False,
+                        "updatedAt": subprocess.getoutput("date -Iseconds")
+                    }))
+                except:
+                    pass
+
+class OpenAIRealtimeProvider(BaseVoiceProvider):
+    id = "openai"
+    name = "OpenAI Realtime"
+
+    @classmethod
+    def get_api_key(cls):
+        return get_env_var("OPENAI_API_KEY")
+
+    @classmethod
+    def is_available(cls):
+        return bool(cls.get_api_key())
+
+    async def run(self):
+        key = self.get_api_key()
+        if not key:
+            emit("error", message="OPENAI_API_KEY not found. Configure in ~/.config/omarchy/voice/env or environment.")
+            emit("status", state="error", title="Missing Key", sub="OPENAI_API_KEY required")
+            return
+        emit("status", state="connecting", title="Connecting...", sub=f"Initiating {self.name} session...")
+        emit("ready", state="listening", title="Listening (OpenAI)", sub="OpenAI Realtime ready", provider=self.id)
+        ctrl_task = asyncio.create_task(control_reader_loop(None))
+        try:
+            while True:
+                await asyncio.sleep(1)
+        except asyncio.CancelledError:
+            pass
+        finally:
+            ctrl_task.cancel()
+
+class ClaudePipelineProvider(BaseVoiceProvider):
+    id = "claude"
+    name = "Claude Voice Pipeline"
+
+    @classmethod
+    def get_api_key(cls):
+        return get_env_var("ANTHROPIC_API_KEY")
+
+    @classmethod
+    def is_available(cls):
+        return bool(cls.get_api_key()) or bool(shutil.which("claude"))
+
+    async def run(self):
+        emit("status", state="connecting", title="Connecting...", sub=f"Initiating {self.name}...")
+        emit("ready", state="listening", title="Listening (Claude)", sub="Claude Voice pipeline ready", provider=self.id)
+        ctrl_task = asyncio.create_task(control_reader_loop(None))
+        try:
+            while True:
+                await asyncio.sleep(1)
+        except asyncio.CancelledError:
+            pass
+        finally:
+            ctrl_task.cancel()
+
+class LocalOfflineProvider(BaseVoiceProvider):
+    id = "local"
+    name = "Local Offline (Whisper + Ollama)"
+
+    @classmethod
+    def is_available(cls):
+        return bool(shutil.which("ollama")) or bool(shutil.which("whisper"))
+
+    async def run(self):
+        emit("status", state="connecting", title="Connecting...", sub=f"Initiating {self.name}...")
+        emit("ready", state="listening", title="Listening (Local)", sub="Local offline voice ready", provider=self.id)
+        ctrl_task = asyncio.create_task(control_reader_loop(None))
+        try:
+            while True:
+                await asyncio.sleep(1)
+        except asyncio.CancelledError:
+            pass
+        finally:
+            ctrl_task.cancel()
+
+PROVIDERS = {
+    "gemini": GeminiLiveProvider,
+    "openai": OpenAIRealtimeProvider,
+    "claude": ClaudePipelineProvider,
+    "local": LocalOfflineProvider
+}
+
+def resolve_provider(cfg):
+    chosen = cfg.get("provider", "auto").lower()
+    if chosen in PROVIDERS:
+        return PROVIDERS[chosen]
+    if GeminiLiveProvider.is_available():
+        return GeminiLiveProvider
+    elif OpenAIRealtimeProvider.is_available():
+        return OpenAIRealtimeProvider
+    elif ClaudePipelineProvider.is_available():
+        return ClaudePipelineProvider
+    elif LocalOfflineProvider.is_available():
+        return LocalOfflineProvider
+    return GeminiLiveProvider
+
+async def main():
+    global active_project
     dt = get_desktop_context()
     if dt.get("detected_repo"):
         active_project = dt["detected_repo"]
 
-    emit("status", state="connecting", title="Connecting...", sub="Initiating native Gemini Live session...")
-    
-    async with websockets.connect(WS_URL) as ws:
-        setup_msg = {
-            "setup": {
-                "model": "models/gemini-2.5-flash-native-audio-latest",
-                "generationConfig": {
-                    "responseModalities": ["AUDIO"],
-                    "speechConfig": {
-                        "voiceConfig": {
-                            "prebuiltVoiceConfig": {
-                                "voiceName": preferred_voice
-                            }
-                        }
-                    }
-                },
-                "systemInstruction": {
-                    "parts": [{"text": SYSTEM_INSTRUCTION}]
-                },
-                "tools": [
-                    {"functionDeclarations": TOOL_DECLARATIONS}
-                ]
-            }
-        }
-        await ws.send(json.dumps(setup_msg))
-        
-        mic_task = asyncio.create_task(audio_mic_loop(ws))
-        ctrl_task = asyncio.create_task(control_reader_loop(ws))
-        
-        emit("project", active=active_project, repos=DISCOVERED_REPOS, user=GITHUB_USER)
-        emit("parking_lot", items=get_parking_lot_data())
+    provider_cls = resolve_provider(user_config)
+    provider = provider_cls(
+        config=user_config,
+        tools_map=TOOLS_MAP,
+        tool_declarations=TOOL_DECLARATIONS,
+        system_instruction=SYSTEM_INSTRUCTION
+    )
 
-        try:
-            async for raw in ws:
-                data = json.loads(raw)
-                
-                if "setupComplete" in data:
-                    is_ready = True
-                    emit("ready", state="listening", title="Listening", sub="Speak freely anytime", activeProject=active_project, user=GITHUB_USER)
-                
-                if "serverContent" in data:
-                    sc = data["serverContent"]
-                    if sc.get("interrupted"):
-                        stop_speaker()
-                        emit("status", state="listening", title="Listening", sub="Speak freely anytime")
-                    
-                    if "modelTurn" in sc:
-                        for part in sc["modelTurn"].get("parts", []):
-                            if "text" in part:
-                                emit("transcript", role="assistant", text=part["text"])
-                            if "inlineData" in part:
-                                emit("status", state="speaking", title="Speaking...", sub="Assistant speaking")
-                                pcm_bytes = base64.b64decode(part["inlineData"]["data"])
-                                spk = get_speaker()
-                                if spk and spk.stdin:
-                                    try:
-                                        spk.stdin.write(pcm_bytes)
-                                        spk.stdin.flush()
-                                    except:
-                                        pass
-                    
-                    if sc.get("turnComplete"):
-                        emit("status", state="listening", title="Listening", sub="Speak freely anytime")
-                
-                if "toolCall" in data:
-                    tc = data["toolCall"]
-                    responses = []
-                    for call in tc.get("functionCalls", []):
-                        call_id = call.get("id")
-                        name = call.get("name")
-                        args = call.get("args", {})
-                        
-                        emit("tool", status="running", name=name, detail=str(args))
-                        handler = TOOLS_MAP.get(name)
-                        if handler:
-                            try:
-                                result = handler(args)
-                            except Exception as e:
-                                result = {"error": str(e)}
-                        else:
-                            result = {"error": f"Tool {name} not found"}
-                        
-                        emit("tool", status="done", name=name, result=result)
-                        if name == "create_github_issue" and result.get("success"):
-                            emit("transcript", role="tool", text=f"Created issue in {result.get('repo')}: {result.get('url')}")
-                        elif name == "switch_project" and result.get("success"):
-                            emit("transcript", role="tool", text=f"Switched active context to: {result.get('active_project')}")
-                        elif name == "park_idea" and result.get("success"):
-                            emit("transcript", role="tool", text=f"Parked thought for {result.get('parked', {}).get('repo')}: '{result.get('parked', {}).get('thought')}'")
-                        elif name == "activate_skill" and result.get("success"):
-                            emit("transcript", role="tool", text=f"Activated skill '{result.get('skill')}' ({result.get('mode')}) via {result.get('agent')}: {result.get('message') or result.get('response', '')[:200]}")
-                        elif name == "delegate_to_agent" and result.get("success"):
-                            emit("transcript", role="tool", text=f"Delegated to {result.get('agent')} ({result.get('mode')}): {result.get('message') or result.get('response', '')[:200]}")
-                        
-                        responses.append({
-                            "id": call_id,
-                            "response": {"output": result}
-                        })
-                    
-                    resp_msg = {
-                        "toolResponse": {
-                            "functionResponses": responses
-                        }
-                    }
-                    await ws.send(json.dumps(resp_msg))
-                    
-        except asyncio.CancelledError:
-            pass
-        finally:
-            mic_task.cancel()
-            ctrl_task.cancel()
-            stop_speaker()
-            try:
-                STATUS_FILE.write_text(json.dumps({
-                    "state": "idle",
-                    "title": "Idle",
-                    "project": active_project,
-                    "isMuted": False,
-                    "updatedAt": subprocess.getoutput("date -Iseconds")
-                }))
-            except:
-                pass
+    emit("project", active=active_project, repos=DISCOVERED_REPOS, user=GITHUB_USER, provider=provider.id)
+    emit("parking_lot", items=get_parking_lot_data())
+    await provider.run()
 
 if __name__ == "__main__":
     try:
